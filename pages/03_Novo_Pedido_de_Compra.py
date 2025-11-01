@@ -137,12 +137,14 @@ else:
     if st.button("Enviar Pedido para Aprovação", type="primary", on_click=submit_form):
         if edited_df.empty or edited_df['Descrição'].iloc[0] == '':
             st.error("Adicione pelo menos um item ao pedido.")
-            st.session_state.form_submitted = False # Garante que não mude de tela
+            st.session_state.form_submitted = False
         else:
             conn = None
             try:
                 conn = sqlite3.connect('database/compras.db')
                 cursor = conn.cursor()
+                
+                # --- ETAPA 1: SALVAR PEDIDO E ITENS ---
                 cursor.execute("""
                     INSERT INTO purchase_orders (user_id, requester, po_number, justification, spreadsheet_link, supplier_name, supplier_cnpj, supplier_contact, payment_method, bank_details, delivery_date, due_date, delivery_address, total_value, status)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -157,38 +159,42 @@ else:
                         INSERT INTO order_items (order_id, quantity, unit, description, unit_value, total_value)
                         VALUES (?, ?, ?, ?, ?, ?)
                     """, (order_id, row['Qtde'], row['Unidade'], row['Descrição'], row['Valor Un.'], row['Valor Total']))
-                conn.commit()
-
-                # Envio de notificações
+                
+                # --- ETAPA 2: CRIAR NOTIFICAÇÕES POP-UP ---
                 cursor.execute("SELECT id FROM users WHERE role = 'aprovador' AND is_active = 1")
                 approvers = cursor.fetchall()
                 for approver in approvers:
                     message_popup = f"Novo pedido de compra #{order_id} (Total: R$ {total_geral:,.2f}) aguardando sua aprovação."
                     cursor.execute("INSERT INTO notifications (user_id, message, is_read) VALUES (?, ?, ?)", (approver[0], message_popup, False))
-                conn.commit()
-
+                
+                # --- ETAPA 3: BUSCAR E-MAILS E ENVIAR ---
                 cursor.execute("SELECT email FROM users WHERE (role = 'aprovador' OR role = 'administrador') AND email IS NOT NULL AND email != '' AND is_active = 1")
                 recipient_emails = [row[0] for row in cursor.fetchall()]
+                
+                # Salva tudo no banco de dados ANTES de tentar enviar o e-mail
+                conn.commit()
+
+                # Agora, com os dados salvos, tenta enviar o e-mail
                 if recipient_emails:
                     send_email_notification(order_id, st.session_state.get('username', ''), total_geral, recipient_emails)
+                else:
+                    st.warning("AVISO: Pedido salvo, mas não há e-mails de aprovadores/administradores cadastrados para enviar a notificação.")
 
             except Exception as e:
                 st.error(f"Ocorreu um erro CRÍTICO ao salvar o pedido: {e}")
                 if conn: conn.rollback()
-                st.session_state.form_submitted = False # Garante que não mude de tela
+                st.session_state.form_submitted = False
             finally:
                 if conn: conn.close()
             
-            # Limpa o dataframe da sessão para o próximo pedido
-            if 'items_df' in st.session_state:
-                del st.session_state['items_df']
-            
-            # Força o rerender para mostrar a tela de sucesso
-            st.rerun()
+            if st.session_state.get('form_submitted', False):
+                if 'items_df' in st.session_state:
+                    del st.session_state['items_df']
+                st.rerun()
 
 # Botão de Sair na barra lateral
 if st.sidebar.button("Sair"):
-    create_new_order() # Limpa o estado do formulário ao sair
+    create_new_order()
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     st.switch_page("app.py")
