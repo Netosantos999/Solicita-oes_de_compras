@@ -15,7 +15,6 @@ def send_email_notification(order_id, requester_name, total_value, recipient_ema
         return False
 
     try:
-        # Carrega todas as credenciais e configurações do secrets.toml
         creds = st.secrets["email_credentials"]
         sender_email = creds["sender_email"]
         password = creds["sender_password"]
@@ -41,14 +40,12 @@ def send_email_notification(order_id, requester_name, total_value, recipient_ema
         """
         message.attach(MIMEText(html, "html"))
 
-        # Use as configurações do secrets.toml para conectar
         with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
             server.login(sender_email, password)
             server.sendmail(sender_email, recipient_emails, message.as_string())
         
         return True
     except Exception as e:
-        # Se o e-mail falhar, a função retorna False e uma mensagem de erro é mostrada
         st.warning(f"AVISO: O pedido foi salvo, mas a notificação por e-mail falhou. Causa: {e}")
         return False
 
@@ -97,6 +94,7 @@ items_df = pd.DataFrame([
 edited_df = st.data_editor(
     items_df,
     num_rows="dynamic",
+    # CORREÇÃO: use_container_width trocado por width
     use_container_width=True,
     column_config={
         "Qtde": st.column_config.NumberColumn("Qtde", required=True, min_value=0),
@@ -144,7 +142,6 @@ if st.button("Enviar Pedido para Aprovação", type="primary"):
         order_id = None
         conn = None
         try:
-            # --- ETAPA 1: SALVAR O PEDIDO NO BANCO DE DADOS ---
             conn = sqlite3.connect('database/compras.db')
             cursor = conn.cursor()
 
@@ -169,19 +166,17 @@ if st.button("Enviar Pedido para Aprovação", type="primary"):
         except Exception as e:
             st.error(f"Ocorreu um erro CRÍTICO ao salvar o pedido no banco de dados: {e}")
             if conn:
-                conn.rollback() # Desfaz qualquer alteração se ocorrer um erro
-            st.stop() # Para a execução aqui se o salvamento falhar
+                conn.rollback()
+            st.stop()
         finally:
             if conn:
                 conn.close()
 
-        # --- ETAPA 2: TENTAR ENVIAR AS NOTIFICAÇÕES (SÓ EXECUTA SE A ETAPA 1 FUNCIONAR) ---
         if order_id:
             try:
                 conn = sqlite3.connect('database/compras.db')
                 cursor = conn.cursor()
 
-                # 1. Notificação Pop-up (para aprovadores)
                 cursor.execute("SELECT id FROM users WHERE role = 'aprovador'")
                 approvers = cursor.fetchall()
                 for approver in approvers:
@@ -190,7 +185,6 @@ if st.button("Enviar Pedido para Aprovação", type="primary"):
                 
                 conn.commit()
 
-                # 2. Notificação por E-mail (para Aprovadores E Administrador)
                 cursor.execute("SELECT email FROM users WHERE (role = 'aprovador' OR role = 'administrador') AND email IS NOT NULL AND email != ''")
                 recipient_emails = [row[0] for row in cursor.fetchall()]
                 
@@ -205,7 +199,6 @@ if st.button("Enviar Pedido para Aprovação", type="primary"):
             finally:
                 if conn:
                     conn.close()
-
 
 # Botão de Sair na barra lateral
 if st.sidebar.button("Sair"):

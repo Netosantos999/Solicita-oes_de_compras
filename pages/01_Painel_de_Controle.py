@@ -42,7 +42,6 @@ def get_order_details(order_id):
 
 def get_approvers_status(order_id):
     """Verifica o status de aprovação para um pedido."""
-    # CORREÇÃO: Trocado 'request_id' por 'order_id' e 'approved=1' por "status='aprovado'"
     approved_by_query = """
         SELECT u.username 
         FROM approvals a 
@@ -50,7 +49,6 @@ def get_approvers_status(order_id):
         WHERE a.order_id = ? AND a.status = 'aprovado'
     """
     
-    # Busca todos os usuários que são aprovadores
     all_approvers_query = "SELECT username FROM users WHERE role = 'aprovador' AND is_active = 1"
     
     approved_list = [row[0] for row in cursor.execute(approved_by_query, (order_id,)).fetchall()]

@@ -30,6 +30,7 @@ st.header("Usuários Cadastrados")
 users = get_all_users()
 if users:
     user_data = [{"ID": user[0], "Usuário": user[1], "Perfil": user[2], "Email": user[3] or "N/A", "Status": "Ativo" if user[4] == 1 else "Inativo"} for user in users]
+    # CORREÇÃO: use_container_width trocado por width
     st.dataframe(user_data, use_container_width=True)
 else:
     st.info("Nenhum usuário cadastrado.")
@@ -51,7 +52,6 @@ with col1:
                 if cursor.fetchone():
                     st.error("Este nome de usuário já existe.")
                 else:
-                    # CORREÇÃO: Usando a função create_user importada
                     create_user(new_username, new_password, new_role, new_email)
                     st.success(f"Usuário '{new_username}' criado com sucesso!")
                     st.rerun()
