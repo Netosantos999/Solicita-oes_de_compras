@@ -46,10 +46,6 @@ def send_email_notification(order_id, requester_name, total_value, recipient_ema
         return False
 
 # --- LÓGICA DE CONTROLE DE ESTADO DO FORMULÁRIO ---
-def submit_form():
-    """Função de callback para o botão de envio."""
-    st.session_state.form_submitted = True
-
 def create_new_order():
     """Limpa o estado para permitir um novo pedido."""
     keys_to_delete = ['form_submitted', 'last_order_id', 'items_df']
@@ -57,10 +53,16 @@ def create_new_order():
         if key in st.session_state:
             del st.session_state[key]
 
-# Proteção da página
-if not st.session_state.get('logged_in') or st.session_state.get('role') not in ['Solicitante', 'administrador', 'aprovador']:
+# --- PROTEÇÃO DA PÁGINA ---
+# Se não estiver logado, redireciona para a página de login
+if not st.session_state.get('logged_in'):
+    st.switch_page("app.py")
+
+# Proteção de perfil
+if st.session_state.get('role') not in ['Solicitante', 'administrador', 'aprovador']:
     st.error("PAGINA NÃO AUTORIZADA PARA ESSE USUARIO")
     st.stop()
+
 
 handle_notifications()
 st.set_page_config(page_title="Novo Pedido de Compra", layout="wide")
@@ -167,13 +169,11 @@ else:
                     conn.commit()
                     st.success(f"Pedido #{order_id} salvo com sucesso no sistema!")
 
-                    # Tenta enviar o e-mail APÓS salvar tudo
                     email_sent_successfully = send_email_notification(order_id, st.session_state.get('username', ''), total_geral, recipient_emails)
 
             except Exception as e:
                 st.error(f"Ocorreu um erro CRÍTICO ao salvar o pedido: {e}")
 
-            # A tela de sucesso só aparece se o e-mail foi enviado (ou se não havia ninguém para notificar)
             if email_sent_successfully:
                 st.session_state.form_submitted = True
                 st.rerun()
