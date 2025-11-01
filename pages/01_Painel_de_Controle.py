@@ -1,150 +1,162 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-import plotly.express as px
 from auth.utils import handle_notifications
+import plotly.express as px
 from datetime import datetime
 
-# Proteção de segurança e verificação de notificações
+# Proteção da página
 if not st.session_state.get('logged_in'):
-    st.error("Por favor, faça o login primeiro.")
-    st.switch_page("app.py")
+    st.error("Você precisa estar logado para acessar esta página.")
     st.stop()
 
 handle_notifications()
 
 st.set_page_config(page_title="Painel de Controle", layout="wide")
+st.title("Painel de Controle de Pedidos")
 
-def generate_html_report(orders_df, conn):
-    """Gera uma string HTML contendo o relatório detalhado dos pedidos."""
+conn = sqlite3.connect('database/compras.db', check_same_thread=False)
+cursor = conn.cursor()
+
+# --- Funções de busca no banco de dados ---
+
+def get_all_orders():
+    """Busca todos os pedidos."""
+    query = "SELECT id, requester, po_number, created_at, total_value, status FROM purchase_orders ORDER BY created_at DESC"
+    return pd.read_sql_query(query, conn)
+
+def get_user_orders(user_id):
+    """Busca os pedidos de um usuário específico."""
+    query = "SELECT id, requester, po_number, created_at, total_value, status FROM purchase_orders WHERE user_id = ? ORDER BY created_at DESC"
+    return pd.read_sql_query(query, conn, params=(user_id,))
+
+def get_order_details(order_id):
+    """Busca os detalhes e itens de um pedido específico."""
+    details_query = "SELECT * FROM purchase_orders WHERE id = ?"
+    items_query = "SELECT quantity, unit, description, unit_value, total_value FROM order_items WHERE order_id = ?"
     
-    # Estilos CSS para o relatório
-    styles = """
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .report-header { text-align: center; border-bottom: 2px solid #ccc; padding-bottom: 10px; }
-        .order-container { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px; padding: 15px; background-color: #f9f9f9; }
-        .order-title { color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .success { color: green; }
-        .warning { color: orange; }
-    </style>
+    details = pd.read_sql_query(details_query, conn, params=(order_id,))
+    items = pd.read_sql_query(items_query, conn, params=(order_id,))
+    
+    return details.iloc[0] if not details.empty else None, items
+
+def get_approvers_status(order_id):
+    """Verifica o status de aprovação para um pedido."""
+    # CORREÇÃO: Trocado 'request_id' por 'order_id' e 'approved=1' por "status='aprovado'"
+    approved_by_query = """
+        SELECT u.username 
+        FROM approvals a 
+        JOIN users u ON a.user_id = u.id 
+        WHERE a.order_id = ? AND a.status = 'aprovado'
     """
     
-    html = f"<html><head><title>Relatório de Pedidos</title>{styles}</head><body>"
-    html += f"<div class='report-header'><h1>Relatório de Pedidos de Compra</h1><p>Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p></div>"
+    # Busca todos os usuários que são aprovadores
+    all_approvers_query = "SELECT username FROM users WHERE role = 'aprovador' AND is_active = 1"
+    
+    approved_list = [row[0] for row in cursor.execute(approved_by_query, (order_id,)).fetchall()]
+    all_approvers_list = [row[0] for row in cursor.execute(all_approvers_query).fetchall()]
+    
+    pending_list = [approver for approver in all_approvers_list if approver not in approved_list]
+    
+    return approved_list, pending_list
 
-    all_approvers_list = pd.read_sql_query("SELECT username FROM users WHERE role = 'aprovador'", conn)['username'].tolist()
+# --- Lógica de exibição ---
 
-    for _, order in orders_df.iterrows():
-        html += "<div class='order-container'>"
-        html += f"<h2 class='order-title'>Pedido #{order['id']} - Status: {order['status'].upper()}</h2>"
-        html += f"<p><b>Solicitante:</b> {order['requester']}</p>"
-        html += f"<p><b>Valor Total:</b> R$ {order['total_value']:,.2f}</p>"
-        html += f"<p><b>Justificativa:</b> {order['justification']}</p>"
-
-        # Tabela de Itens
-        items_df = pd.read_sql_query(f"SELECT quantity, unit, description, unit_value, total_value FROM order_items WHERE order_id = {order['id']}", conn)
-        html += "<h3>Itens do Pedido</h3>"
-        html += "<table><tr><th>Qtde</th><th>Unidade</th><th>Descrição</th><th>Valor Un.</th><th>Valor Total</th></tr>"
-        for _, item in items_df.iterrows():
-            html += f"<tr><td>{item['quantity']}</td><td>{item['unit']}</td><td>{item['description']}</td><td>R$ {item['unit_value']:,.2f}</td><td>R$ {item['total_value']:,.2f}</td></tr>"
-        html += "</table>"
-
-        # Status de Aprovação
-        if order['status'] == 'pendente':
-            html += "<h3>Análise de Aprovações</h3>"
-            approved_by_df = pd.read_sql_query(f"SELECT u.username FROM approvals a JOIN users u ON a.user_id = u.id WHERE a.request_id = {order['id']} AND a.approved = 1", conn)
-            approved_by_list = approved_by_df['username'].tolist()
-            pending_approvers = [p for p in all_approvers_list if p not in approved_by_list]
-            
-            if approved_by_list:
-                html += f"<p class='success'><b>Já aprovado por:</b> {', '.join(approved_by_list)}</p>"
-            if pending_approvers:
-                html += f"<p class='warning'><b>Aguardando aprovação de:</b> {', '.join(pending_approvers)}</p>"
-        
-        html += "</div>"
-
-    html += "</body></html>"
-    return html
-
-# --- Lógica de Título e Consulta ---
 user_role = st.session_state.get('role')
 user_id = st.session_state.get('user_id')
 
 if user_role == 'Solicitante':
-    st.title("Meus Pedidos Enviados")
-    query = "SELECT * FROM purchase_orders WHERE user_id = ? ORDER BY id DESC"
-    params = (user_id,)
+    st.header("Meus Pedidos")
+    df_orders = get_user_orders(user_id)
 else:
-    st.title("Painel de Controle de Pedidos")
-    query = "SELECT * FROM purchase_orders ORDER BY id DESC"
-    params = ()
+    st.header("Todos os Pedidos")
+    df_orders = get_all_orders()
 
-# --- Exibição dos Dados ---
-try:
-    conn = sqlite3.connect('database/compras.db')
-    all_orders_df = pd.read_sql_query(query, conn, params=params)
+if df_orders.empty:
+    st.info("Nenhum pedido encontrado.")
+else:
+    # --- Gráfico de Pizza ---
+    st.subheader("Status dos Pedidos")
+    status_counts = df_orders['status'].value_counts().reset_index()
+    status_counts.columns = ['status', 'count']
+    
+    fig = px.pie(status_counts, names='status', values='count', 
+                 title='Distribuição de Status dos Pedidos',
+                 color='status',
+                 color_discrete_map={'pendente':'orange', 'aprovado':'green', 'rejeitado':'red'})
+    st.plotly_chart(fig, use_container_width=True)
 
-    if all_orders_df.empty:
-        st.info("Nenhum pedido encontrado.")
+    # --- Tabela de Pedidos ---
+    st.subheader("Lista de Pedidos")
+    st.dataframe(df_orders, use_container_width=True)
+
+    # --- Detalhes dos Pedidos Pendentes ---
+    st.subheader("Detalhes dos Pedidos Pendentes")
+    pending_orders = df_orders[df_orders['status'] == 'pendente']
+
+    if pending_orders.empty:
+        st.success("Não há pedidos pendentes de aprovação.")
     else:
-        # --- Botão de Download ---
-        st.subheader("Exportar Relatório")
-        html_report = generate_html_report(all_orders_df, conn)
-        st.download_button(
-            label="📥 Baixar Relatório Detalhado (HTML)",
-            data=html_report,
-            file_name="relatorio_pedidos.html",
-            mime="text/html",
-            use_container_width=True
-        )
+        for index, order in pending_orders.iterrows():
+            with st.expander(f"Pedido #{order['po_number']} - Solicitante: {order['requester']} - Valor: R$ {order['total_value']:,.2f}"):
+                details, items = get_order_details(order['id'])
+                if details is not None:
+                    st.write("##### Itens do Pedido")
+                    st.dataframe(items, use_container_width=True)
+                    
+                    st.write("##### Justificativa")
+                    st.text(details['justification'] or "N/A")
 
-        # --- Gráfico de Pizza ---
-        st.subheader("Status Geral dos Pedidos")
-        status_counts = all_orders_df['status'].value_counts().reset_index()
-        status_counts.columns = ['status', 'count']
-        
-        fig = px.pie(
-            status_counts, 
-            names='status', 
-            values='count', 
-            title='Distribuição de Status dos Pedidos',
-            color='status',
-            color_discrete_map={'pendente':'orange', 'aprovado':'green', 'reprovado':'red'}
-        )
-        st.plotly_chart(fig, use_container_width=True)
+                    st.write("##### Status de Aprovação")
+                    approved, pending = get_approvers_status(order['id'])
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.success("**Aprovado por:**")
+                        st.write(", ".join(approved) or "Ninguém ainda")
+                    with col2:
+                        st.warning("**Pendente de:**")
+                        st.write(", ".join(pending) or "N/A")
 
-        # --- Relatório Detalhado na Página ---
-        st.subheader("Lista de Pedidos")
-        all_approvers_df = pd.read_sql_query("SELECT username FROM users WHERE role = 'aprovador'", conn)
-        all_approvers_list = all_approvers_df['username'].tolist()
+# --- Geração de Relatório ---
+st.divider()
+st.header("Relatórios")
 
-        for index, order in all_orders_df.iterrows():
-            with st.expander(f"Pedido #{order['id']} - {order['requester']} - Valor: R$ {order['total_value']:,.2f} - Status: {order['status'].upper()}"):
-                st.markdown(f"**Nº Pedido (interno):** {order['po_number']}")
-                st.markdown(f"**Justificativa:** {order['justification']}")
-                
-                if order['status'] == 'pendente':
-                    st.markdown("---")
-                    st.markdown("**Análise de Aprovações:**")
-                    approved_by_df = pd.read_sql_query(f"SELECT u.username FROM approvals a JOIN users u ON a.user_id = u.id WHERE a.request_id = {order['id']} AND a.approved = 1", conn)
-                    approved_by_list = approved_by_df['username'].tolist()
-                    pending_approvers = [p for p in all_approvers_list if p not in approved_by_list]
+def generate_html_report(data_frame):
+    """Gera um relatório HTML a partir de um DataFrame."""
+    report_date = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    html = f"""
+    <html>
+    <head>
+        <title>Relatório de Pedidos</title>
+        <style>
+            body {{ font-family: sans-serif; }}
+            table {{ width: 100%; border-collapse: collapse; }}
+            th, td {{ border: 1px solid #dddddd; text-align: left; padding: 8px; }}
+            tr:nth-child(even) {{ background-color: #f2f2f2; }}
+            h1 {{ color: #333; }}
+        </style>
+    </head>
+    <body>
+        <h1>Relatório de Pedidos de Compra</h1>
+        <p>Gerado em: {report_date}</p>
+        {data_frame.to_html(index=False)}
+    </body>
+    </html>
+    """
+    return html
 
-                    if approved_by_list:
-                        st.success(f"**Já aprovado por:** {', '.join(approved_by_list)}")
-                    if pending_approvers:
-                        st.warning(f"**Aguardando aprovação de:** {', '.join(pending_approvers)}")
-                    else:
-                        st.info("Todos os aprovadores já registraram seu voto.")
+if not df_orders.empty:
+    report_html = generate_html_report(df_orders)
+    st.download_button(
+        label="Baixar Relatório Detalhado (HTML)",
+        data=report_html,
+        file_name="relatorio_pedidos.html",
+        mime="text/html"
+    )
+else:
+    st.info("Não há dados para gerar um relatório.")
 
-    conn.close()
-
-except Exception as e:
-    st.error(f"Não foi possível carregar o painel de controle: {e}")
 
 # Botão de Sair na barra lateral
 if st.sidebar.button("Sair"):
