@@ -30,9 +30,10 @@ username = st.text_input("Usuário")
 password = st.text_input("Senha", type="password")
 
 if st.button("Entrar"):
-    if login_user(username, password):
+    success, message = login_user(username, password)
+    if success:
         # Se o login for bem-sucedido, define o estado e redireciona
         st.session_state['logged_in'] = True
-        st.switch_page("pages/01_Painel_de_Controle.py")
+        st.rerun() # Usar st.rerun() para garantir a atualização do estado antes de trocar de página
     else:
-        st.error("Usuário ou senha incorretos.")
+        st.error(message)
