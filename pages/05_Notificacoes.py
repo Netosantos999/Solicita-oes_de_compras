@@ -2,9 +2,10 @@ import streamlit as st
 import sqlite3
 from auth.utils import handle_notifications
 
-# Proteção da página
-if not st.session_state.get('logged_in'):
-    st.error("Por favor, faça o login primeiro.")
+# Proteção de acesso à página
+if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
+    st.error("Você precisa estar logado para acessar esta página.")
+    st.switch_page("app.py")
     st.stop()
 
 handle_notifications()

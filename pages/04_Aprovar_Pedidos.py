@@ -3,9 +3,16 @@ import sqlite3
 import pandas as pd
 from auth.utils import handle_notifications
 
-# Proteção da página
-if not st.session_state.get('logged_in') or st.session_state.get('role') not in ['aprovador', 'administrador']:
-    st.error("PAGINA NÃO AUTORIZADA PARA ESSE USUARIO")
+# Proteção de acesso à página
+if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
+    st.error("Você precisa estar logado para acessar esta página.")
+    st.switch_page("app.py")
+    st.stop()
+
+# Proteção de perfil
+if st.session_state.get('role') not in ['aprovador', 'administrador']:
+    st.error("PÁGINA NÃO AUTORIZADA PARA ESSE USUÁRIO.")
+    st.switch_page("pages/01_Painel_de_Controle.py")
     st.stop()
 
 handle_notifications()
